@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Industrial SCADA Pro - Multi Machine</title>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1"></script>
+
+
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+
+
+<style>
+  .gauge{
+  transition:0.3s;
+    width:clamp(80px, 7vw, 110px);
+   height:clamp(80px, 7vw, 110px);
+  border-radius:50%;
+  border:10px solid #4fd1c5;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  margin:auto;
+  font-size:clamp(16px, 1.2vw, 22px);
+   border-width:8px;
+  font-weight:bold;
+}
+
+.top-gauge-row{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:20px;
+  margin-top:15px;
+  flex-wrap:nowrap;      /* สำคัญ → ไม่ให้ตกบรรทัด */
+}
+
+.gauge-box{
+  text-align:center;
+  flex:1;
+}
+
+body{
+  margin:0;
+  font-family:'Segoe UI',sans-serif;
+  background:linear-gradient(135deg,#2f6f6d,#3c8c88);
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  height:100vh;
+}
+.login-screen{
+  position:fixed;
+  width:100%;
+  height:100%;
+  background:linear-gradient(135deg,#1c1f26,#252a33);
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  z-index:1000;
+}
+.login-box{
+  background:#252a33;
+  padding:40px;
+  border-radius:15px;
+  width:350px;
+  text-align:center;
+  box-shadow:0 20px 40px rgba(0,0,0,0.5);
+  color:white;
+}
+.login-box input{
+  width:100%;
+  padding:12px;
+  margin:10px 0;
+  border:none;
+  border-radius:8px;
+  background:#1c1f26;
+  color:white;
+}
+.login-box button{
+  width:100%;
+  padding:12px;
+  border:none;
+  border-radius:8px;
+  background:#4fd1c5;
+  cursor:pointer;
+}
+.error{color:#ff5f5f;margin-top:10px}
+
+.dashboard-frame{
+  width:95vw;
+  height:calc(100vh - 20px);
+  overflow:auto;          /* เปลี่ยนจาก hidden เป็น auto */
+  background:#1c1f26;
+  border-radius:20px;
+  padding:20px;
+  box-shadow:0 20px 40px rgba(0,0,0,0.4);
+  color:white;
+  display:flex;           /* เปลี่ยนจาก none เป็น flex */
+  flex-direction:column;
+}
+
+
+.topbar{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+
+.machine-selector{
+  margin:10px 0;
+}
+
+.machine-btn{
+  padding:6px 15px;
+  border:none;
+  border-radius:6px;
+  margin-right:5px;
+  cursor:pointer;
+  background:#323844;
+  color:white;
+}
+
+.machine-btn.active{
+  background:#4fd1c5;
+  color:black;
+}
+
+.content{display:flex;gap:20px;flex:1;}
+.sidebar{width:200px;background:#252a33;border-radius:15px;padding:20px;}
+.menu-item{padding:10px;margin-bottom:10px;border-radius:8px;cursor:pointer;}
+.menu-item:hover{background:#323844}
+
+.main{
+  flex:1;
+  display:grid;
+  grid-template-columns: 1fr 1fr 1.3fr; 
+  grid-template-rows: auto 1fr 1fr;   /* สำคัญ */
+  gap:16px;
+  min-height:0;         
+}
+
+
+
+.card{
+  background:#252a33;
+  border-radius:15px;
+   padding:14px;
+  
+}
+
+.card h4{
+  color:#4fd1c5;
+  margin-top:0;
+}
+
+.gauge-box{
+  text-align:center;
+  flex:1;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+}
+
+
+
+.status-green{color:#4fd1c5}
+.status-red{color:#ff5f5f}
+.blink{animation:blink 1s infinite;}
+@keyframes blink{50%{opacity:0.3}}
+
+.alarm-log{
+  height:110px;
+  max-height:110px;      /* กันยืด */
+  overflow-y:auto;       /* เลื่อนแนวตั้ง */
+  overflow-x:hidden;
+  font-size:12px;
+  background:#1c1f26;
+  padding:10px;
+  border-radius:8px;
+  box-sizing:border-box;
+  word-break:break-word; /* กันข้อความยาวดันกล่อง */
+}
+
+
+
+.motor-current-card {
+    grid-column: 2;   /* ย้ายมาอยู่ช่องกลาง */
+}
+
+
+
+.current-value{
+  font-size:42px;
+  font-weight:bold;
+  color:#4fd1c5;
+  text-align:center;
+}
+
+.current-bar-container{
+  width:100%;
+  height:20px;
+  background:#1c1f26;
+  border-radius:10px;
+  overflow:hidden;
+  margin-top:20px;
+}
+
+.current-bar{
+  height:100%;
+  width:0%;
+  background:#4fd1c5;
+  transition:0.3s;
+}
+
+.current-bar.high{background:#ff5f5f;}
+
+.status-bar{
+  margin-top:10px;
+  font-size:14px;
+  opacity:0.8;
+}
+.temp-trend-card{
+  grid-column: 3;     /* ไปอยู่คอลัมน์ที่ 3 (ขวาสุด) */
+  grid-row: span 2;   /* ให้สูงกินพื้นที่ 2 ช่อง */
+  height: 100%;
+}
+
+.temp-trend-card canvas{
+  width:100% !important;
+  height:200px !important;
+}
+/* ย้าย Incoming Message ไปแถว 3 คอลัมน์ 2 */
+.incoming-card{
+  grid-column: 2;
+  grid-row: 3;
+}
+
+/* ขยับ Temperature Trend ขึ้นมา */
+.temp-trend-card{
+  grid-column: 3;
+  grid-row: 2;
+  height: 100%;
+}
+
+
+</style>
+</head>
+<body>
+
+<div class="login-screen" id="loginScreen">
+  <div class="login-box">
+    <h2>SCADA Login</h2>
+    <input type="text" id="username" placeholder="Username">
+    <input type="password" id="password" placeholder="Password">
+    <button onclick="login()">Login</button>
+    <div class="error" id="errorMsg"></div>
+  </div>
+</div>
+
+<div class="dashboard-frame" id="dashboard">
+
+  <div class="topbar">
+    <div style="color:#4fd1c5;font-size:22px;font-weight:bold;">
+      INDUSTRIAL SCADA PRO
+    </div>
+    <div id="clock"></div>
+    <button onclick="logout()" style="background:#ff5f5f;border:none;padding:8px 15px;border-radius:8px;color:white;cursor:pointer;">
+      Logout
+    </button>
+  </div>
+
+  <!-- MACHINE SELECTOR -->
+  <div class="machine-selector">
+    <button class="machine-btn active" id="btn1" onclick="selectMachine(1)">Machine 1</button>
+    <button class="machine-btn" id="btn2" onclick="selectMachine(2)">Machine 2</button>
+  </div>
+
+  <div class="content">
+
+    <div class="sidebar">
+      <div class="menu-item">Dashboard</div>
+      <div class="menu-item">Monitoring</div>
+      <div class="menu-item">Alarm</div>
+    </div>
+
+    <div class="main">
+
+    <div class="card" style="grid-column: span 3;">
+  <h4>Machine Parameters</h4>
+
+  <div class="top-gauge-row">
+
+    <div class="gauge-box">
+  <div class="gauge-label">Speed</div>
+  <div class="gauge" id="speedGauge">-- RPM</div>
+  <div id="speedStatus" style="margin-top:6px;font-size:13px;"></div>
+</div>
+
+
+
+    <div class="gauge-box">
+      <div class="gauge-label">Lower</div>
+      <div class="gauge" id="tempLowerGauge">-- °C</div>
+    </div>
+
+    <div class="gauge-box">
+      <div class="gauge-label">Pressure</div>
+      <div class="gauge" id="pressureGauge">-- bar</div>
+    </div>
+
+    <div class="gauge-box">
+      <div class="gauge-label">Feed</div>
+      <div class="gauge" id="feedValveGauge">-- %</div>
+    </div>
+
+    
+
+    <div class="gauge-box">
+      <div class="gauge-label">Vibration</div>
+      <div class="gauge" id="vibrationGauge">-- mm/s</div>
+    </div>
+
+  </div>
+</div>
+
+      <div class="card">
+  <h4>Machine Status</h4>
+
+  <div style="margin-top:15px;">
+    <div>
+      <strong>Motor :</strong>
+      <span id="motorStatus" class="status-green">● RUNNING</span>
+    </div>
+
+    <div style="margin-top:10px;">
+      <strong>Isolation Valve :</strong>
+      <span id="isoStatus" class="status-red">● CLOSED</span>
+    </div>
+  </div>
+</div>
+      
+
+      <div class="card motor-current-card">
+        <h4>Motor Current</h4>
+        <div class="current-value" id="motorCurrentValue">--</div>
+        <div class="current-bar-container">
+          <div class="current-bar" id="currentBar"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h4>Incoming Message</h4>
+        <div class="alarm-log" id="rawMessage">No Data</div>
+      </div>
+
+      <div class="card">
+        <h4>MQTT Status</h4>
+        <p id="mqttStatus" class="status-red">● DISCONNECTED</p>
+        <p style="font-size:12px">Topic: scada/machineX</p>
+        <p style="font-size:12px">Messages: <span id="msgCounter">0</span></p>
+      </div>
+
+      <div class="card temp-trend-card">
+  <h4>
+    <button onclick="resetZoom()"
+style="float:right;margin-right:10px;
+background:#4fd1c5;color:black;
+border:none;padding:5px 10px;border-radius:6px;cursor:pointer;">
+Reset
+</button>
+
+    Trend Graph
+    <select id="graphSelector" onchange="changeGraph(this.value)"
+style="float:right;background:#1c1f26;color:white;border:none;padding:5px;">
+    <option value="temp_upper">Upper Temp</option>
+    <option value="temp_lower">Lower Temp</option>
+    <option value="pressure">Pressure</option>
+    <option value="current">Motor Current</option>
+    <option value="vibration">Vibration</option>
+</select>
+
+<!-- 👇 เพิ่มตรงนี้ -->
+<select id="timeRange" onchange="changeTimeRange(this.value)"
+style="float:right;margin-right:10px;background:#1c1f26;color:white;border:none;padding:5px;">
+    <option value="1">1 Min</option>
+    <option value="5">5 Min</option>
+    <option value="10">10 Min</option>
+</select>
+
+  </h4>
+  <canvas id="tempChart"></canvas>
+</div>
+
+
+
+    </div>
+  </div>
+
+  <div class="status-bar" id="statusBar">
+    PLC: WAITING | MQTT: DISCONNECTED | MACHINE: 1
+  </div>
+
+</div>
+
+<script>
+
+const historyData = {
+  temp_upper: [],
+  temp_lower: [],
+  pressure: [],
+  current: [],
+  vibration: []
+};
+const HISTORY_DURATION = 30 * 60 * 1000; // 30 นาที (ms)
+let selectedGraph = "temp_upper";
+let rangeMinutes = 1; 
+let tempChart;
+let mqttClient;
+let messageCount=0;
+let currentMachine=1;
+
+/* CLOCK */
+setInterval(()=>{
+  document.getElementById("clock").innerText=new Date().toLocaleString();
+},1000);
+
+/* LOGIN */
+function login(){
+
+  const user = document.getElementById("username").value.trim();
+  const pass = document.getElementById("password").value.trim();
+
+  if(user === "admin" && pass === "1234"){
+    localStorage.setItem("isLoggedIn","true");
+    document.getElementById("loginScreen").style.display="none";
+    document.getElementById("dashboard").style.display="flex";
+    startSystem();
+  }else{
+    document.getElementById("errorMsg").innerText="Invalid username or password";
+  }
+}
+
+   function logout(){
+  localStorage.removeItem("isLoggedIn");
+  location.reload();
+}
+
+const loginScreen = document.getElementById("loginScreen");
+const dashboard = document.getElementById("dashboard");
+
+function showDashboard(){
+  loginScreen.style.display="none";
+  dashboard.style.display="flex";
+}
+
+
+/* MACHINE SWITCH */
+function selectMachine(machine){
+
+  currentMachine = machine;
+
+  document.getElementById("btn1").classList.remove("active");
+  document.getElementById("btn2").classList.remove("active");
+  document.getElementById("btn"+machine).classList.add("active");
+
+  messageCount = 0;
+  document.getElementById("msgCounter").innerText = 0;
+  document.getElementById("rawMessage").innerHTML = "No Data";
+
+  if(mqttClient){
+    mqttClient.unsubscribe("#");
+    mqttClient.subscribe("scada/machine"+machine);
+  }
+
+  document.getElementById("statusBar").innerText =
+    "PLC: ONLINE | MQTT: CONNECTED | MACHINE: "+machine;
+}
+
+
+function startSystem(){
+   Chart.defaults.locale = 'th-TH';   // ← ใส่ตรงนี้
+  const ctx = document.getElementById('tempChart');
+
+  tempChart = new Chart(ctx,{
+    type:'line',
+    data:{
+      datasets:[{
+    label:'Temperature',
+    data:[],
+    borderColor:'#4fd1c5',
+    borderWidth:2,
+    pointRadius:0,      // 👈 เอาจุดออก
+    tension:0.3,        // 👈 ทำให้เส้น smooth
+    parsing:false
+}]
+
+    },
+    options:{
+  responsive:true,
+  animation:false,
+
+  parsing:false,
+  normalized:true,
+
+  scales:{
+    x:{
+      type:'time',
+      time:{ unit:'minute' }
+    }
+  },
+
+  plugins:{
+
+  decimation:{
+    enabled:true,
+    algorithm:'lttb',
+    samples:500
+  },
+
+  zoom:{
+    limits:{
+      x:{ min:'original', max:'original' }
+    },
+
+    pan:{
+      enabled:true,
+      mode:'x'
+    },
+
+    zoom:{
+      wheel:{ enabled:true },      // เลื่อนเมาส์ซูม
+      pinch:{ enabled:true },      // มือถือ
+      drag:{ enabled:true },       // ลากครอบซูม
+      mode:'x'
+    }
+  }
+}
+
+}
+
+  });
+
+  connectMQTT();
+}
+
+
+/* UPDATE CURRENT */
+function updateMotorCurrent(value){
+
+  document.getElementById("motorCurrentValue").innerText = value.toFixed(1);
+
+  let percent=value;
+  if(percent>100) percent=100;
+
+  document.getElementById("currentBar").style.width = percent + "%";
+
+  const bar = document.getElementById("currentBar");
+
+  if(value > 80){
+      bar.classList.add("high");
+  }else{
+      bar.classList.remove("high");
+  }
+
+}   // ✅ ← ใส่ปิดตรงนี้
+
+
+
+
+function connectMQTT(){
+
+  const broker = "wss://f59f77e5714644e4a27810bf4e502210.s1.eu.hivemq.cloud:8884/mqtt";
+
+  const mqttStatusEl = document.getElementById("mqttStatus");
+
+  mqttClient = mqtt.connect(broker,{
+    clientId: "webClient_" + Math.random().toString(16).substr(2,8),
+    username: "chonlachadchannel",
+    password: "0844249230Zz.",
+    clean: true,
+    reconnectPeriod: 2000,
+    connectTimeout: 4000
+  });
+
+  mqttClient.on("connect", ()=>{
+    console.log("MQTT CONNECTED");
+
+    mqttStatusEl.innerText = "● CONNECTED";
+    mqttStatusEl.className = "status-green";
+
+    document.getElementById("statusBar").innerText =
+      "PLC: ONLINE | MQTT: CONNECTED | MACHINE: " + currentMachine;
+
+    mqttClient.subscribe("scada/machine" + currentMachine);
+  });
+
+  mqttClient.on("error", (err)=>{
+    console.log("MQTT ERROR:", err);
+
+    mqttStatusEl.innerText = "● CONNECTION ERROR";
+    mqttStatusEl.className = "status-red";
+  });
+
+  mqttClient.on("reconnect", ()=>{
+    console.log("Reconnecting...");
+  });
+
+  mqttClient.on("close", ()=>{
+    console.log("MQTT CLOSED");
+
+    mqttStatusEl.innerText = "● DISCONNECTED";
+    mqttStatusEl.className = "status-red";
+  });
+
+  mqttClient.on("message", function(topic, message){
+
+    messageCount++;
+    document.getElementById("msgCounter").innerText = messageCount;
+    document.getElementById("rawMessage").innerText = message.toString();
+
+    try {
+      const data = JSON.parse(message.toString());
+
+      if(data.Temperature_upper !== undefined){
+          updateChart("temp_upper", data.Temperature_upper);
+      }
+
+      if(data.Temperature_lower !== undefined){
+          document.getElementById("tempLowerGauge").innerText =
+  data.Temperature_lower + " °C";
+          updateChart("temp_lower", data.Temperature_lower);
+      }
+
+      if(data.Motor_current !== undefined){
+          updateMotorCurrent(data.Motor_current);
+          updateChart("current", data.Motor_current);
+      }
+
+      if(data.PressurVibration !== undefined){
+          document.getElementById("vibrationGauge").innerText =
+  data.PressurVibration + " mm/s";
+          updateChart("vibration", data.PressurVibration);
+      }
+       // 👇 ใส่ตรงนี้เลย
+      if(data.feed !== undefined){
+          document.getElementById("feedValveGauge").innerText =
+            data.feed + " %";
+          updateValveColor(data.feed);
+      }
+
+      if(data.speed !== undefined){
+          document.getElementById("speedGauge").innerText =
+            data.speed + " RPM";
+          updateSpeedStatus(data.speed);
+      }
+
+      
+
+    } catch(e) {
+      console.log("Invalid JSON:", e);
+    }
+
+  });
+
+}
+
+
+const MAX_POINTS = 3000; // รองรับ ~50 นาที ที่ 1Hz
+
+function updateChart(type, value){
+
+  const now = Date.now();
+
+  historyData[type].push({
+    x: now,
+    y: value
+  });
+
+  // ตัดตามเวลา
+  const cutoff = now - (rangeMinutes * 60 * 1000);
+  while(historyData[type].length &&
+        historyData[type][0].x < cutoff){
+      historyData[type].shift();
+  }
+
+  // ตัดตามจำนวน (กัน RAM บวม)
+  if(historyData[type].length > MAX_POINTS){
+      historyData[type].shift();
+  }
+
+  if(type === selectedGraph){
+      tempChart.data.datasets[0].data = historyData[type];
+      tempChart.update('none');
+  }
+}
+
+
+
+function checkAlarm(temp){
+  if(temp>75){
+    motorStatus.innerText="● STOPPED";
+    motorStatus.className="status-red blink";
+  }else{
+    motorStatus.innerText="● RUNNING";
+    motorStatus.className="status-green";
+  }
+}
+
+window.onload=function(){
+  if(localStorage.getItem("isLoggedIn")==="true"){
+    showDashboard();
+    startSystem();
+  }
+}
+function updateValveColor(value){
+
+    const gauge = document.getElementById("feedValveGauge");
+
+    if(!gauge) return;  // กัน error ถ้า element ไม่มี
+
+    if(value > 80){
+        gauge.style.borderColor = "#ff5f5f";
+    }
+    else if(value > 30){
+        gauge.style.borderColor = "#facc15";
+    }
+    else{
+        gauge.style.borderColor = "#4fd1c5";
+    }
+}
+
+function updateSpeedStatus(speed){
+
+  const el = document.getElementById("speedStatus");
+  if(!el) return;
+
+  if(speed > 1400){
+      el.innerText = "● AT SPEED";
+      el.style.color = "#4fd1c5";
+  }
+  else if(speed > 200){
+      el.innerText = "● RAMPING";
+      el.style.color = "#facc15";
+  }
+  else{
+      el.innerText = "● STOP";
+      el.style.color = "#ff5f5f";
+  }
+}
+
+function changeGraph(type){
+  selectedGraph = type;
+
+  tempChart.data.datasets[0].label = getGraphLabel(type);
+  tempChart.data.datasets[0].data = historyData[type];
+
+  tempChart.update();
+}
+
+function changeTimeRange(mins){
+  rangeMinutes = parseInt(mins);
+}
+
+function getGraphLabel(type){
+  if(type === "temp_upper") return "Upper Temperature";
+  if(type === "temp_lower") return "Lower Temperature";
+  if(type === "pressure") return "Pressure";
+  if(type === "current") return "Motor Current";
+  if(type === "vibration") return "Vibration";
+  return "Trend";
+}
+function resetZoom(){
+  if(tempChart){
+    tempChart.resetZoom();
+  }
+}
+
+</script>
+</body>
+</html>
